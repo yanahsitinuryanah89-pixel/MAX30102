@@ -1,0 +1,6 @@
+text
+.target/
+*.bck
+*.d
+*.elf
+*.hex
