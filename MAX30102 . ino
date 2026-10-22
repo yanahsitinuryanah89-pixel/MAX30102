@@ -1,0 +1,87 @@
+uint16_t redBuffer[100]; // Data sensor LED merah
+#else
+// Untuk papan yang memori RAM lebih besar (ESP32 / Mega)
+uint32_t irBuffer[100]; 
+uint32_t redBuffer[100]; 
+#endif
+
+int32_t bufferLength; // Panjang data buffer
+int32_t spo2; // Hasil perhitungan SpO2
+int8_t validSPO2; // Indikator validitas SpO2 (1 = valid, 0 = tidak valid)
+int32_t heartRate; // Hasil perhitungan Detak Jantung
+int8_t validHeartRate; // Indikator validitas Detak Jantung (1 = valid, 0 = tidak valid)
+
+void setup() {
+  Serial.begin(115200); // Buka komunikasi serial dengan kecepatan 115200 bps
+
+  // Inisialisasi sensor
+  if (!particleSensor.begin(Wire, I2C_SPEED_FAST)) {
+    Serial.println(F("Sensor MAX30102 tidak ditemukan. Mohon periksa perkabelan Anda!"));
+    while (1);
+  }
+
+  // Konfigurasi dasar sensor untuk pembacaan SpO2 dan Heart Rate
+  byte ledBrightness = 60; // Pilihan kecerahan: 0=Mati hingga 255=Maksimal
+  byte sampleAverage = 4; // Pilihan: 1, 2, 4, 8, 16, 32
+  byte ledMode = 2; // Mode: 1 = Hanya Merah, 2 = Merah + IR (Gunakan 2 untuk SpO2)
+  byte sampleRate = 100; // Kecepatan sampel: 50, 100, 200, 400, 800, 1000, 1600, 3200
+  int pulseWidth = 411; // Lebar pulsa: 69, 118, 215, 411
+  int adcRange = 4096; // Rentang ADC: 2048, 4096, 8192, 16384
+
+  particleSensor.setup(ledBrightness, sampleAverage, ledMode, sampleRate, pulseWidth, adcRange);
+}
+
+void loop() {
+  bufferLength = 100; // Ambil 100 sampel pertama sebagai data dasar awal
+
+  // Membaca 100 sampel data pertama dari sensor
+  for (byte i = 0 ; i < bufferLength ; i++) {
+    while (particleSensor.available() == false)
+      particleSensor.check(); // Cek sensor apakah ada data baru
+
+    redBuffer[i] = particleSensor.getRed();
+    irBuffer[i] = particleSensor.getIR();
+    particleSensor.nextSample(); 
+  }
+
+  // Hitung detak jantung dan SpO2 berdasarkan 100 sampel pertama
+  maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
+
+  // Terus lakukan pembacaan secara berkelanjutan
+  while (1) {
+    // Geser data buffer untuk menyisakan ruang bagi 25 sampel baru
+    for (byte i = 25; i < 100; i++) {
+      redBuffer[i - 25] = redBuffer[i];
+      irBuffer[i - 25] = irBuffer[i];
+    }
+
+    // Ambil 25 sampel data baru
+    for (byte i = 75; i < 100; i++) {
+      while (particleSensor.available() == false)
+        particleSensor.check();
+
+      redBuffer[i] = particleSensor.getRed();
+      irBuffer[i] = particleSensor.getIR();
+      particleSensor.nextSample();
+    }
+
+    // Hitung ulang nilai detak jantung dan SpO2 dengan data terbaru
+    maxim_heart_rate_and_oxygen_saturation(irBuffer, bufferLength, redBuffer, &spo2, &validSPO2, &heartRate, &validHeartRate);
+    
+    // Cetak hasil pembacaan ke Serial Monitor
+    Serial.print(F("HR="));
+    if (validHeartRate == 1) {
+      Serial.print(heartRate, DEC);
+    } else {
+      Serial.print(F("Membaca..."));
+    }
+
+    Serial.print(F(" | SpO2="));
+    if (validSPO2 == 1) {
+      Serial.print(spo2, DEC);
+      Serial.println(F("%"));
+    } else {
+      Serial.println(F("Membaca..."));
+    }
+  }
+}
